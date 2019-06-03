@@ -1,26 +1,11 @@
 package dropbox;
 
-import static microgram.api.java.Result.error;
-import static microgram.api.java.Result.ErrorCode.CONFLICT;
-import static microgram.api.java.Result.ErrorCode.INTERNAL_ERROR;
-import static microgram.api.java.Result.ErrorCode.NOT_FOUND;
-
 import java.io.File;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Scanner;
-import java.util.concurrent.CompletableFuture;
 
-import javax.ws.rs.GET;
-import javax.ws.rs.Path;
-import javax.ws.rs.QueryParam;
-
-import org.glassfish.jersey.jdkhttp.JdkHttpServerFactory;
-import org.glassfish.jersey.server.ResourceConfig;
 import org.pac4j.scribe.builder.api.DropboxApi20;
 
 import com.github.scribejava.core.builder.ServiceBuilder;
@@ -29,14 +14,15 @@ import com.github.scribejava.core.model.OAuthRequest;
 import com.github.scribejava.core.model.Response;
 import com.github.scribejava.core.model.Verb;
 import com.github.scribejava.core.oauth.OAuth20Service;
-import com.sun.net.httpserver.HttpServer;
 
+import dropbox.msgs.AccessFileV2Args;
 import dropbox.msgs.CreateFileV2Args;
 import dropbox.msgs.CreateFolderV2Args;
 import dropbox.msgs.ListFolderContinueV2Args;
 import dropbox.msgs.ListFolderV2Args;
 import dropbox.msgs.ListFolderV2Return;
 import microgram.api.java.Result;
+import utils.Hash;
 import utils.JSON;
 
 
@@ -55,9 +41,9 @@ import utils.JSON;
  */
 public class DropboxClient
 {
-	private static final String apiKey = "TO BE COMPLETED";
-	private static final String apiSecret = "TO BE COMPLETED";
-	private static final String accessTokenStr = "TO BE COMPLETED";
+	private static final String apiKey = "hw279p1hfiss7qu";
+	private static final String apiSecret = "hvmwuxtlv2f51z4";
+	private static final String accessTokenStr = "6NNhCP3syewAAAAAAAACqojVZEDCsWcgQrIxZd9JEj8jhuzFKNvYDYz57ST35vtH";
 
 	protected static final String JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 	protected static final String OCTETSTREAM_CONTENT_TYPE = "application/octet-stream";
@@ -66,15 +52,17 @@ public class DropboxClient
 	private static final String LIST_FOLDER_V2_URL = "https://api.dropboxapi.com/2/files/list_folder";
 	private static final String LIST_FOLDER_CONTINUE_V2_URL = "https://api.dropboxapi.com/2/files/list_folder/continue";
 	private static final String CREATE_FILE_V2_URL = "https://content.dropboxapi.com/2/files/upload";
-	private static final String DELETE_FILE_V2_URL = "https://api.dropboxapi.com/2/files/delete";
+	private static final String DELETE_FILE_V2_URL = "https://api.dropboxapi.com/2/files/delete_v2";
 	private static final String DOWNLOAD_FILE_V2_URL = "https://content.dropboxapi.com/2/files/download";
+	@SuppressWarnings("unused")
 	private static final String GET_TEMPORARY_LINK_FILE_V2_URL = "https://api.dropboxapi.com/2/files/get_temporary_link";
 
+	@SuppressWarnings("unused")
 	private static final String DROPBOX_API_ARG = "Dropbox-API-Arg";
 
 	protected OAuth20Service service;
 	protected OAuth2AccessToken accessToken;
-	
+
 	/**
 	 * Creates a dropbox client, given the access token.
 	 * @param accessTokenStr String with the previously obtained access token.
@@ -210,7 +198,7 @@ public class DropboxClient
 			return Result.error(Result.ErrorCode.INTERNAL_ERROR);
 		}
 	}
-	
+
 	/**
 	 * Write the contents of file name.
 	 * https://www.dropbox.com/developers/documentation/http/documentation#files-upload
@@ -218,11 +206,31 @@ public class DropboxClient
 	 * @param filename File name.
 	 * @param bytes Contents of the file.
 	 */
-	public Result<String> upload(String filename, byte[] bytes) {
-		
-		
-		
-		return Result.error(Result.ErrorCode.NOT_IMPLEMENTED);
+	public Result<String> upload(byte[] bytes) {
+		try {
+			String path = Hash.of(bytes);
+			OAuthRequest uploadFile = new OAuthRequest(Verb.POST, CREATE_FILE_V2_URL);
+			uploadFile.addHeader("Content-Type", JSON_CONTENT_TYPE);
+
+			uploadFile.setPayload(JSON.encode(new CreateFileV2Args(path)));
+
+			service.signRequest(accessToken, uploadFile);
+			Response r = service.execute(uploadFile);
+
+			if( r.getCode() == 409 ) {
+				System.err.println("Dropbox file already exists");
+				return Result.error( Result.ErrorCode.CONFLICT);
+			} else if( r.getCode() == 200) {
+				System.err.println("Dropbox file was created with success");
+				return Result.ok();
+			} else {
+				System.err.println("Unexpected error HTTP: " + r.getCode());
+				return Result.error(Result.ErrorCode.INTERNAL_ERROR);
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+			return Result.error( Result.ErrorCode.INTERNAL_ERROR);
+		}
 	}
 
 	/**
@@ -234,10 +242,30 @@ public class DropboxClient
 	 * @return Returns the file contents.
 	 */
 	public Result<byte[]> download(String filename) {
-		// TODO: TO BE COMPLETED
-		return Result.error(Result.ErrorCode.NOT_IMPLEMENTED);
+		try{
+			OAuthRequest downloadFile = new OAuthRequest(Verb.GET, DOWNLOAD_FILE_V2_URL);
+			downloadFile.addHeader("Content-Type", JSON_CONTENT_TYPE);
+
+			downloadFile.setPayload(JSON.encode(new AccessFileV2Args(filename)));
+			service.signRequest(accessToken, downloadFile);
+			Response r = service.execute(downloadFile);
+
+			if( r.getCode() == 404 ) {
+				System.err.println("Dropbox file not found");
+				return Result.error( Result.ErrorCode.NOT_FOUND);
+			} else if( r.getCode() == 200) {
+				System.err.println("Dropbox file was downloaded with success");
+				return Result.ok();
+			} else {
+				System.err.println("Unexpected error HTTP: " + r.getCode());
+				return Result.error(Result.ErrorCode.INTERNAL_ERROR);
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+			return Result.error( Result.ErrorCode.INTERNAL_ERROR);
+		}
 	}
-	
+
 	/**
 	 * Deletes the file name.
 	 * https://www.dropbox.com/developers/documentation/http/documentation#files-delete
@@ -245,7 +273,27 @@ public class DropboxClient
 	 * @param filename File name.
 	 */
 	public Result<Void> delete(String filename) {
-		// TODO: TO BE COMPLETED
-		return Result.error(Result.ErrorCode.NOT_IMPLEMENTED);
+		try{
+			OAuthRequest deleteFile = new OAuthRequest(Verb.GET, DELETE_FILE_V2_URL);
+			deleteFile.addHeader("Content-Type", JSON_CONTENT_TYPE);
+
+			deleteFile.setPayload(JSON.encode(new AccessFileV2Args(filename)));
+			service.signRequest(accessToken, deleteFile);
+			Response r = service.execute(deleteFile);
+
+			if( r.getCode() == 404 ) {
+				System.err.println("Dropbox file not found");
+				return Result.error( Result.ErrorCode.NOT_FOUND);
+			} else if( r.getCode() == 200) {
+				System.err.println("Dropbox file was deleted with success");
+				return Result.ok();
+			} else {
+				System.err.println("Unexpected error HTTP: " + r.getCode());
+				return Result.error(Result.ErrorCode.INTERNAL_ERROR);
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+			return Result.error( Result.ErrorCode.INTERNAL_ERROR);
+		}
 	}
 }
